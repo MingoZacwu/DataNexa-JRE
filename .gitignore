@@ -1,0 +1,14 @@
+# Build output
+dist/
+artifacts/
+release/
+
+# Local signing material
+*.key
+*.key.pub
+*.minisig
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

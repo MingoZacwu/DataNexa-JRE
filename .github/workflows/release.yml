@@ -1,0 +1,150 @@
+name: Release JRE
+
+on:
+  workflow_dispatch:
+    inputs:
+      jre_version:
+        description: Exact Temurin JDK 21 version used to build the runtime
+        required: true
+        type: string
+      release_tag:
+        description: Immutable release tag, for example jre-21.0.8+9
+        required: true
+        type: string
+      min_app_version:
+        description: Minimum DataNexa version that can consume this manifest
+        required: true
+        default: 0.8.0
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }}-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos
+            arch: aarch64
+            shell: bash
+          - runner: macos-13
+            platform: macos
+            arch: x86_64
+            shell: bash
+          - runner: windows-latest
+            platform: windows
+            arch: x86_64
+            shell: pwsh
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.jre_version }}
+
+      - name: Verify runner architecture
+        if: runner.os == 'macOS'
+        run: |
+          uname -m
+          test "$(uname -m)" = "${{ matrix.arch }}"
+
+      - name: Build JRE archive (Unix)
+        if: runner.os == 'macOS'
+        env:
+          JRE_PLATFORM: ${{ matrix.platform }}
+          JRE_ARCH: ${{ matrix.arch }}
+          JRE_VERSION: ${{ inputs.jre_version }}
+          OUTPUT_DIR: dist
+        run: bash scripts/build-jre.sh
+
+      - name: Build JRE archive (Windows)
+        if: runner.os == 'Windows'
+        env:
+          JRE_PLATFORM: ${{ matrix.platform }}
+          JRE_ARCH: ${{ matrix.arch }}
+          JRE_VERSION: ${{ inputs.jre_version }}
+          OUTPUT_DIR: dist
+        run: ./scripts/build-jre.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jre-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish releases
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: jre-*
+          merge-multiple: true
+
+      - name: Generate manifest
+        env:
+          ARTIFACT_DIR: dist
+          JRE_VERSION: ${{ inputs.jre_version }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          MIN_APP_VERSION: ${{ inputs.min_app_version }}
+        run: node scripts/generate-manifest.mjs
+
+      - name: Install Minisign
+        env:
+          MINISIGN_VERSION: 0.12
+          MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+        run: |
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz" \
+            --output minisign.tar.gz
+          printf '%s  %s\n' "$MINISIGN_SHA256" minisign.tar.gz | sha256sum --check --status
+          tar -xzf minisign.tar.gz
+          install -m 0755 minisign-linux/x86_64/minisign "$RUNNER_TEMP/minisign"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Sign manifest
+        env:
+          JRE_MINISIGN_SECRET_KEY: ${{ secrets.JRE_MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.JRE_MINISIGN_PASSWORD }}
+        run: |
+          test -n "$JRE_MINISIGN_SECRET_KEY"
+          printf '%s' "$JRE_MINISIGN_SECRET_KEY" > jre-signing.key
+          minisign -S -s jre-signing.key -m dist/jre-manifest.json -x dist/jre-manifest.json.minisig
+          rm -f jre-signing.key
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/datanexa-jre-*.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "DataNexa JRE ${{ inputs.jre_version }}" \
+            --notes "Platform-specific DataNexa JRE built from Temurin ${{ inputs.jre_version }}." \
+            --latest=false
+
+      - name: Publish moving manifest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view jre-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload jre-latest dist/jre-manifest.json dist/jre-manifest.json.minisig \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create jre-latest dist/jre-manifest.json dist/jre-manifest.json.minisig \
+              --repo "$GITHUB_REPOSITORY" --title "DataNexa JRE latest" \
+              --notes "Moving manifest for the latest DataNexa JRE." --latest=false
+          fi
