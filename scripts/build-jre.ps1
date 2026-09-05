@@ -33,7 +33,8 @@ try {
   & $java -version 2>&1 | Select-Object -First 1
 
   $archive = "datanexa-jre-21-$Platform-$Arch.tar.gz"
-  tar.exe -czf (Join-Path $OutputDir $archive) -C $runtime .
+  # Dereference JDK legal-file symlinks for cross-platform extraction.
+  tar.exe -czhf (Join-Path $OutputDir $archive) -C $runtime .
   if ($LASTEXITCODE -ne 0) { throw "tar failed." }
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $OutputDir $archive)).Hash.ToLowerInvariant()
   Set-Content -NoNewline -Path (Join-Path $OutputDir "$archive.sha256") -Value $hash

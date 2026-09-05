@@ -32,7 +32,9 @@ trap 'rm -rf "$build_parent"' EXIT
 "$runtime/bin/java" -version
 
 archive="datanexa-jre-21-${platform}-${arch}.tar.gz"
-tar -czf "$output_dir/$archive" -C "$runtime" .
+# Dereference the JDK's legal-file symlinks so the archive can be extracted
+# consistently on Windows and macOS without requiring symlink privileges.
+tar -czhf "$output_dir/$archive" -C "$runtime" .
 sha256sum "$output_dir/$archive" | awk '{print $1}' > "$output_dir/$archive.sha256"
 cat > "$output_dir/$archive.json" <<EOF
 {
