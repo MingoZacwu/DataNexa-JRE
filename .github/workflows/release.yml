@@ -30,10 +30,12 @@ jobs:
           - runner: macos-15
             platform: macos
             arch: aarch64
+            uname_arch: arm64
             shell: bash
-          - runner: macos-13
+          - runner: macos-15-intel
             platform: macos
             arch: x86_64
+            uname_arch: x86_64
             shell: bash
           - runner: windows-latest
             platform: windows
@@ -56,7 +58,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           uname -m
-          test "$(uname -m)" = "${{ matrix.arch }}"
+          test "$(uname -m)" = "${{ matrix.uname_arch }}"
 
       - name: Build JRE archive (Unix)
         if: runner.os == 'macOS'
