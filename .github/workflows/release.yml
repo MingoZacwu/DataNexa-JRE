@@ -118,7 +118,6 @@ jobs:
       - name: Sign manifest
         env:
           JRE_MINISIGN_SECRET_KEY: ${{ secrets.JRE_MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.JRE_MINISIGN_PASSWORD }}
         run: |
           test -n "$JRE_MINISIGN_SECRET_KEY"
           printf '%s' "$JRE_MINISIGN_SECRET_KEY" > jre-signing.key
